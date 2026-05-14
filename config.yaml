@@ -1,0 +1,46 @@
+printer:
+  name: "XP-N160II"
+  columns: 48
+  encoding: "gb18030"
+
+receipt:
+  store_name: "文艺派串串香重庆火锅"
+  start_time: "2026-05-07 09:00:00"
+  end_time: "2026-05-08 09:00:00"
+  currency: "人民币"
+  area: "大厅"
+  status: "已结"
+  print_person: "吧台收银"
+  print_time: "2026-05-08 15:33:50"
+  turnover: 10350.40
+  item_consumption: 10350.40
+  service_fee: 0.00
+  min_consumption_fill: 0.00
+  discount_total: 664.64
+  member_discount: 0.00
+  promotion_discount: 0.00
+  gift_discount: 0.00
+  discount_amount: 0.00
+  fixed_discount: 154.60
+  rounding: 0.00
+  payment_discount: 510.04
+  actual_amount: 0
+  wechat_pay: 4568.10
+  wechat_subsidy: 0.30
+  cash: 640.00
+  alipay: 703.80
+  meituan_group: 3670.00
+  meituan_waimai: 103.56
+
+  bill_count: 73.00
+  open_table_count: 71.00
+  guest_flow: 159.00
+  avg_bill: 141.79
+  avg_table: 142.74
+  avg_person: 63.74
+  open_table_rate: 208.82
+  seat_rate: 233.82
+  turnover_rate: 108.82
+  avg_dining_time: 66.17
+  area_eff: 0.00
+  person_eff: 0.00

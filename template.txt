@@ -1,0 +1,57 @@
+{{center}}{{bold}}营业报表{{reset}}
+{{hr "-"}}
+{{lr "店名称:" .StoreName}}
+{{lr "开始时间:" .StartTime}}
+{{lr "结束时间:" .EndTime}}
+{{lr "币别:" .Currency}}
+{{lr "消费区域:" .Area}}
+{{lr "状态:" .Status}}
+{{lr "打印人:" .PrintPerson}}
+{{lr "打印时间:" .PrintTime}}
+{{hr "-"}}
+
+{{bold}}营业情况{{reset}}
+{{lr "" "金额"}}
+{{lr "营业额" (amt .Turnover)}}
+{{lr "品项消费" (amt .ItemConsumption)}}
+{{lr "服务费" (amt .ServiceFee)}}
+{{lr "最低消费补齐" (amt .MinConsumptionFill)}}
+{{lr "优惠金额" (amt .DiscountTotal)}}
+{{lr "  会员价优惠" (amt .MemberDiscount)}}
+{{lr "  促销优惠" (amt .PromotionDiscount)}}
+{{lr "  赠送优惠" (amt .GiftDiscount)}}
+{{lr "  折扣金额" (amt .DiscountAmount)}}
+{{lr "  定额优惠" (amt .FixedDiscount)}}
+{{lr "  抹零金额" (amt .Rounding)}}
+{{lr "支付优惠" (amt .PaymentDiscount)}}
+{{hr "-"}}
+
+{{bold}}实收金额{{reset}}
+{{lr "实收金额" (amt .ActualAmount)}}
+{{hr "-"}}
+{{lr "微信支付" (amt .WechatPay)}}
+{{lr "微信补贴" (amt .WechatSubsidy)}}
+{{lr "人民币" (amt .Cash)}}
+{{lr "支付宝支付" (amt .Alipay)}}
+{{lr "美团点评团购" (amt .MeituanGroup)}}
+{{lr "美团外卖" (amt .MeituanWaimai)}}
+{{hr "-"}}
+
+{{bold}}经营指标{{reset}}
+{{lr "账单数" (num .BillCount)}}
+{{lr "开台数" (num .OpenTableCount)}}
+{{lr "客流量" (num .GuestFlow)}}
+{{lr "单均消费" (num .AvgBill)}}
+{{lr "桌均消费" (num .AvgTable)}}
+{{lr "人均消费" (num .AvgPerson)}}
+{{lr "开台率" (pct .OpenTableRate)}}
+{{lr "上座率" (pct .SeatRate)}}
+{{lr "翻台率" (pct .TurnoverRate)}}
+{{lr "平均就餐时间" (num .AvgDiningTime)}}
+{{lr "坪效" (num .AreaEff)}}
+{{lr "人效" (num .PersonEff)}}
+{{hr "-"}}
+{{center}}谢谢惠顾！{{reset}}
+{{feed 3}}
+{{cut}}
+
