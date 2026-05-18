@@ -74,6 +74,8 @@ type Receipt struct {
 	PersonEff      float64 `yaml:"person_eff"`
 }
 
+// main 是程序入口：
+// 读取 config.yaml / template.txt → 让用户选择 Windows 打印机 → 渲染模板并发送 ESC/POS 指令打印 → 弹窗提示结果。
 func main() {
 	fmt.Println("正在读取配置...")
 	baseDir, err := exeDir()
@@ -136,6 +138,7 @@ func main() {
 	infoBox("打印完成")
 }
 
+// exeDir 返回当前可执行文件所在目录，用于定位同目录下的 config.yaml / template.txt。
 func exeDir() (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -148,6 +151,7 @@ func exeDir() (string, error) {
 	return filepath.Dir(exePath), nil
 }
 
+// readConfig 读取并解析 YAML 配置；printer.name 允许留空（启动后会交互选择打印机）。
 func readConfig(path string) (Config, error) {
 	var cfg Config
 	b, err := os.ReadFile(path)
@@ -197,6 +201,7 @@ type inputRecord struct {
 	KeyEvent  keyEventRecord
 }
 
+// getDefaultPrinterName 通过 WinAPI 获取系统默认打印机名称（GetDefaultPrinterW）。
 func getDefaultPrinterName() (string, error) {
 	winspool := syscall.NewLazyDLL("winspool.drv")
 	proc := winspool.NewProc("GetDefaultPrinterW")
@@ -225,6 +230,10 @@ func getDefaultPrinterName() (string, error) {
 	return strings.TrimSpace(s), nil
 }
 
+// selectPrinter 在终端中让用户选择要使用的打印机：
+// - 首选交互模式：↑↓移动，Enter确认，Esc取消（VT + ReadConsoleInputW）
+// - 若当前控制台不支持，则回退为输入序号选择
+// preferred 用于定位初始光标（一般来自 config 的 printer.name），其次使用系统默认打印机。
 func selectPrinter(printers []string, defaultName, preferred string) (string, error) {
 	restoreOut, vtOK := enableVTOutput()
 	if restoreOut != nil {
@@ -332,6 +341,7 @@ func selectPrinter(printers []string, defaultName, preferred string) (string, er
 	}
 }
 
+// enableVTOutput 打开控制台的 VT 转义支持（用于清屏、光标控制、颜色高亮）。
 func enableVTOutput() (func(), bool) {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	getStdHandle := kernel32.NewProc("GetStdHandle")
@@ -361,6 +371,7 @@ func enableVTOutput() (func(), bool) {
 	return restore, true
 }
 
+// enableDirectKeyInput 关闭行缓冲与回显，使方向键等按键可以被 ReadConsoleInputW 逐个读取。
 func enableDirectKeyInput() (func(), bool) {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	getStdHandle := kernel32.NewProc("GetStdHandle")
@@ -390,6 +401,8 @@ func enableDirectKeyInput() (func(), bool) {
 	return restore, true
 }
 
+// readVirtualKey 从控制台输入读取一次 KeyDown 事件并返回 VirtualKeyCode。
+// 返回 ok=false 表示本次事件不是“按下键”的 KeyEvent（例如 KeyUp 或其他事件）。
 func readVirtualKey() (uint16, bool, error) {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	getStdHandle := kernel32.NewProc("GetStdHandle")
@@ -428,6 +441,9 @@ func readVirtualKey() (uint16, bool, error) {
 
 const markerDelim = "\x1e"
 
+// renderTemplate 使用 text/template 渲染 template.txt：
+// - 通过 FuncMap 注入控制标记（CENTER/BOLD/RESET/FEED/CUT 等）
+// - 模板输出仍是“文本 + 标记”的单一字符串，后续由 printRendered 逐行解析并下发到打印机
 func renderTemplate(tpl string, cfg Config) (string, error) {
 	funcMap := template.FuncMap{
 		"center": func() string { return markerDelim + "CENTER" + markerDelim },
@@ -473,6 +489,9 @@ func renderTemplate(tpl string, cfg Config) (string, error) {
 
 var feedRe = regexp.MustCompile(`^FEED:(\d+)$`)
 
+// printRendered 解析 renderTemplate 的输出并打印：
+// - 按行处理，行内用 markerDelim 切分控制标记
+// - 标记会改变后续文本的样式（对齐/加粗），或触发走纸/切纸
 func printRendered(p escpos.Printer, rendered string, encoding string) error {
 	if err := p.Initialize(); err != nil {
 		return err
@@ -583,10 +602,12 @@ func printRendered(p escpos.Printer, rendered string, encoding string) error {
 	return nil
 }
 
+// formatAmount 将数值格式化为千分位 + 两位小数（用于金额展示）。
 func formatAmount(v any) string {
 	return formatNumber(v, true)
 }
 
+// formatPercent 将数值格式化为两位小数百分比（例如 208.82%）。
 func formatPercent(v any) string {
 	f, ok := toFloat64(v)
 	if !ok {
@@ -599,6 +620,7 @@ func formatPercent(v any) string {
 	return fmt.Sprintf("%.2f%%", f)
 }
 
+// formatNumber 将数值格式化为两位小数；useComma=true 时整数部分加千分位分隔符。
 func formatNumber(v any, useComma bool) string {
 	f, ok := toFloat64(v)
 	if !ok {
@@ -637,6 +659,7 @@ func formatNumber(v any, useComma bool) string {
 	return string(out)
 }
 
+// toFloat64 将常见数值类型/字符串转换成 float64，模板中可直接传入 int/float/string。
 func toFloat64(v any) (float64, bool) {
 	switch x := v.(type) {
 	case float64:
@@ -678,6 +701,7 @@ func toFloat64(v any) (float64, bool) {
 	}
 }
 
+// joinLeftRight 将 left/right 拼成一行并补空格，使两端对齐（按 columns 与 displayWidth 计算）。
 func joinLeftRight(left, right string, columns int) string {
 	lw := displayWidth(left)
 	rw := displayWidth(right)
@@ -688,6 +712,7 @@ func joinLeftRight(left, right string, columns int) string {
 	return left + strings.Repeat(" ", space) + right
 }
 
+// padLeftByWidth 按显示宽度把字符串左侧补空格到指定宽度（用于右对齐数字）。
 func padLeftByWidth(s string, width int) string {
 	w := displayWidth(s)
 	if w >= width {
@@ -696,6 +721,7 @@ func padLeftByWidth(s string, width int) string {
 	return strings.Repeat(" ", width-w) + s
 }
 
+// displayWidth 估算控制台/小票的等宽显示宽度：ASCII=1，非 ASCII=2（适用于常见中文等宽打印效果）。
 func displayWidth(s string) int {
 	w := 0
 	for _, r := range s {
@@ -708,6 +734,9 @@ func displayWidth(s string) int {
 	return w
 }
 
+// writePrinterText 按 printer.encoding 编码并写入打印机：
+// - utf-8：直接调用 p.Print（库内部会写入字节）
+// - gb18030：将字符串转码后写入原始字节（解决部分机型中文乱码）
 func writePrinterText(p escpos.Printer, s string, encoding string) error {
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "", "utf-8", "utf8":
@@ -724,20 +753,24 @@ func writePrinterText(p escpos.Printer, s string, encoding string) error {
 	}
 }
 
+// fatalWithBox 在终端输出错误并弹窗提示后退出进程（exit code=1）。
 func fatalWithBox(title string, err error) {
 	fmt.Fprintln(os.Stderr, title+":", err)
 	errorBox(title + "\n\n" + err.Error())
 	os.Exit(1)
 }
 
+// infoBox 弹出信息提示框（MessageBoxW, MB_ICONINFORMATION）。
 func infoBox(message string) {
 	messageBox("提示", message, 0x00000040)
 }
 
+// errorBox 弹出错误提示框（MessageBoxW, MB_ICONERROR）。
 func errorBox(message string) {
 	messageBox("错误", message, 0x00000010)
 }
 
+// messageBox 封装 WinAPI MessageBoxW，用于在无 GUI 的情况下提示结果/错误。
 func messageBox(title, text string, flags uintptr) {
 	user32 := syscall.NewLazyDLL("user32.dll")
 	proc := user32.NewProc("MessageBoxW")
