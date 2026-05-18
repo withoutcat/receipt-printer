@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -25,10 +26,13 @@ type Config struct {
 }
 
 type PrinterConfig struct {
-	Name     string `yaml:"name"`
 	Columns  int    `yaml:"columns"`
 	Encoding string `yaml:"encoding"`
 }
+
+var vtEnabled bool
+
+var errUserCancel = errors.New("用户取消")
 
 type Receipt struct {
 	StoreName   string `yaml:"store_name"`
@@ -75,67 +79,144 @@ type Receipt struct {
 }
 
 // main 是程序入口：
-// 读取 config.yaml / template.txt → 让用户选择 Windows 打印机 → 渲染模板并发送 ESC/POS 指令打印 → 弹窗提示结果。
+// 加载配置/模板（一次）→ 同页面交互选择打印机 → 打印 → 显示结果并提供 [Enter]再次打印 / [C]更改打印机 / [Esc]退出。
 func main() {
-	fmt.Println("正在读取配置...")
 	baseDir, err := exeDir()
 	if err != nil {
-		fatalWithBox("无法获取程序目录", err)
+		fail("无法获取程序目录", err)
+		return
 	}
 
+	restoreOut, vtOK := enableVTOutput()
+	vtEnabled = vtOK
+	if restoreOut != nil {
+		defer restoreOut()
+	}
+
+	bannerText, _ := readBanner(filepath.Join(baseDir, "banner.txt"))
+
+	logStep("🧾", "读取配置...")
 	cfg, err := readConfig(filepath.Join(baseDir, "config.yaml"))
 	if err != nil {
-		fatalWithBox("读取 config.yaml 失败", err)
+		fail("读取 config.yaml 失败", err)
+		pause("按 Enter 退出")
+		return
 	}
-
 	if cfg.Printer.Columns <= 0 {
 		cfg.Printer.Columns = 48
 	}
 	if strings.TrimSpace(cfg.Printer.Encoding) == "" {
 		cfg.Printer.Encoding = "utf-8"
 	}
-
 	if cfg.Receipt.ActualAmount == 0 {
 		cfg.Receipt.ActualAmount = cfg.Receipt.WechatPay + cfg.Receipt.WechatSubsidy + cfg.Receipt.Cash + cfg.Receipt.Alipay + cfg.Receipt.MeituanGroup + cfg.Receipt.MeituanWaimai
 	}
 
+	logStep("🧩", "读取模板...")
 	templateText, err := os.ReadFile(filepath.Join(baseDir, "template.txt"))
 	if err != nil {
-		fatalWithBox("读取 template.txt 失败", err)
+		fail("读取 template.txt 失败", err)
+		pause("按 Enter 退出")
+		return
 	}
 
+	logStep("🧠", "渲染模板...")
 	rendered, err := renderTemplate(string(templateText), cfg)
 	if err != nil {
-		fatalWithBox("模板渲染失败", err)
+		fail("模板渲染失败", err)
+		pause("按 Enter 退出")
+		return
 	}
 
-	printers, err := escpos.GetInstalledPrinters()
-	if err != nil {
-		fatalWithBox("读取打印机列表失败", err)
-	}
-	if len(printers) == 0 {
-		fatalWithBox("未找到任何已安装打印机", errors.New("请先安装打印机驱动，并在“设备和打印机”中可见"))
-	}
-	defaultPrinter, _ := getDefaultPrinterName()
-	selectedPrinter, err := selectPrinter(printers, defaultPrinter, cfg.Printer.Name)
-	if err != nil {
-		fatalWithBox("未选择打印机", err)
-	}
-	cfg.Printer.Name = selectedPrinter
-
-	fmt.Println("正在连接打印机:", cfg.Printer.Name)
-	printer, err := escpos.NewWindowsPrinter(cfg.Printer.Name)
-	if err != nil {
-		fatalWithBox("未找到打印机："+cfg.Printer.Name, err)
-	}
-	defer func() { _ = printer.Close() }()
-
-	fmt.Println("正在打印...")
-	if err := printRendered(printer, rendered, cfg.Printer.Encoding); err != nil {
-		fatalWithBox("打印失败", err)
+	baseLogs := []string{
+		color("\x1b[36m", bannerText),
+		"",
+		color("\x1b[90m", "•") + " 🧾 读取配置成功",
+		color("\x1b[90m", "•") + " 🧩 读取模板成功",
+		color("\x1b[90m", "•") + " 🧠 渲染模板成功",
 	}
 
-	infoBox("打印完成")
+	selectedPrinter := ""
+	for {
+		if selectedPrinter == "" {
+			printers, err := escpos.GetInstalledPrinters()
+			if err != nil {
+				fail("读取打印机列表失败", err)
+				pause("按 Enter 重试")
+				continue
+			}
+			if len(printers) == 0 {
+				fail("未找到任何已安装打印机", errors.New("请先安装打印机驱动，并在“设备和打印机”中可见"))
+				pause("按 Enter 重试")
+				continue
+			}
+			defaultPrinter, _ := getDefaultPrinterName()
+			sp, err := selectPrinter(printers, defaultPrinter, baseLogs)
+			if err != nil {
+				if errors.Is(err, errUserCancel) {
+					return
+				}
+				fail("未选择打印机", err)
+				pause("按 Enter 返回")
+				continue
+			}
+			selectedPrinter = sp
+		}
+
+		runLogs := append([]string{}, baseLogs...)
+		runLogs = append(runLogs, "",
+			color("\x1b[90m", "•")+" 🔌 连接打印机: "+selectedPrinter)
+		printPage(runLogs)
+
+		printer, err := escpos.NewWindowsPrinter(selectedPrinter)
+		if err != nil {
+			runLogs = append(runLogs, color("\x1b[31m", "✗ 连接失败: "+err.Error()))
+			choice := showPostActions(runLogs, selectedPrinter)
+			switch choice {
+			case actionRetry:
+				continue
+			case actionSwitch:
+				selectedPrinter = ""
+				continue
+			case actionExit:
+				return
+			}
+		}
+		defer func() { _ = printer.Close() }()
+
+		runLogs = append(runLogs, color("\x1b[90m", "•")+" 🧾 发送打印指令中...")
+		printPage(runLogs)
+
+		printErr := printRendered(printer, rendered, cfg.Printer.Encoding)
+		if closeErr := printer.Close(); closeErr != nil && printErr == nil {
+			printErr = closeErr
+		}
+		if printErr != nil {
+			runLogs = append(runLogs, color("\x1b[31m", "✗ 打印失败: "+printErr.Error()))
+			choice := showPostActions(runLogs, selectedPrinter)
+			switch choice {
+			case actionRetry:
+				continue
+			case actionSwitch:
+				selectedPrinter = ""
+				continue
+			case actionExit:
+				return
+			}
+		}
+
+		runLogs = append(runLogs, color("\x1b[32m", "✅ 已提交到打印队列"))
+		choice := showPostActions(runLogs, selectedPrinter)
+		switch choice {
+		case actionRetry:
+			continue
+		case actionSwitch:
+			selectedPrinter = ""
+			continue
+		case actionExit:
+			return
+		}
+	}
 }
 
 // exeDir 返回当前可执行文件所在目录，用于定位同目录下的 config.yaml / template.txt。
@@ -151,7 +232,7 @@ func exeDir() (string, error) {
 	return filepath.Dir(exePath), nil
 }
 
-// readConfig 读取并解析 YAML 配置；printer.name 允许留空（启动后会交互选择打印机）。
+// readConfig 读取并解析 YAML 配置。
 func readConfig(path string) (Config, error) {
 	var cfg Config
 	b, err := os.ReadFile(path)
@@ -184,6 +265,8 @@ const (
 	vkDown   = 0x28
 	vkReturn = 0x0D
 	vkEscape = 0x1B
+	vkC      = 0x43
+	vkR      = 0x52
 )
 
 type keyEventRecord struct {
@@ -231,29 +314,17 @@ func getDefaultPrinterName() (string, error) {
 }
 
 // selectPrinter 在终端中让用户选择要使用的打印机：
+// - headerLines 会在每次刷新时打印在打印机列表上方（可为 nil）
 // - 首选交互模式：↑↓移动，Enter确认，Esc取消（VT + ReadConsoleInputW）
 // - 若当前控制台不支持，则回退为输入序号选择
-// preferred 用于定位初始光标（一般来自 config 的 printer.name），其次使用系统默认打印机。
-func selectPrinter(printers []string, defaultName, preferred string) (string, error) {
-	restoreOut, vtOK := enableVTOutput()
-	if restoreOut != nil {
-		defer restoreOut()
-	}
-
+func selectPrinter(printers []string, defaultName string, headerLines []string) (string, error) {
 	restoreIn, inOK := enableDirectKeyInput()
 	if restoreIn != nil {
 		defer restoreIn()
 	}
 
 	initial := 0
-	if strings.TrimSpace(preferred) != "" {
-		for i, p := range printers {
-			if p == preferred {
-				initial = i
-				break
-			}
-		}
-	} else if strings.TrimSpace(defaultName) != "" {
+	if strings.TrimSpace(defaultName) != "" {
 		for i, p := range printers {
 			if p == defaultName {
 				initial = i
@@ -262,18 +333,20 @@ func selectPrinter(printers []string, defaultName, preferred string) (string, er
 		}
 	}
 
-	fmt.Println()
-	fmt.Println("可用打印机列表：")
-	for i, p := range printers {
-		suffix := ""
-		if p == defaultName && defaultName != "" {
-			suffix = " (默认打印机)"
+	if !vtEnabled || !inOK {
+		fmt.Println()
+		fmt.Println("可用打印机列表：")
+		for i, p := range printers {
+			suffix := ""
+			if p == defaultName && defaultName != "" {
+				suffix = "【默认打印机】"
+			}
+			if suffix != "" {
+				suffix = " " + suffix
+			}
+			fmt.Printf("%2d) %s%s\n", i+1, p, suffix)
 		}
-		fmt.Printf("%2d) %s%s\n", i+1, p, suffix)
-	}
-	fmt.Println()
-
-	if !vtOK || !inOK {
+		fmt.Println()
 		fmt.Print("请输入序号并回车：")
 		var n int
 		_, err := fmt.Scanln(&n)
@@ -289,12 +362,16 @@ func selectPrinter(printers []string, defaultName, preferred string) (string, er
 	selected := initial
 	redraw := func() {
 		fmt.Print("\x1b[2J\x1b[H")
-		fmt.Println("请选择要使用的打印机（↑↓移动，Enter确认，Esc取消）：")
+		for _, h := range headerLines {
+			fmt.Println(h)
+		}
+		fmt.Println()
+		fmt.Println(color("\x1b[37m", "请选择要使用的打印机（↑↓移动，Enter确认，Esc退出）："))
 		fmt.Println()
 		for i, p := range printers {
 			suffix := ""
 			if p == defaultName && defaultName != "" {
-				suffix = " (默认打印机)"
+				suffix = " " + color("\x1b[36m", "【默认打印机】")
 			}
 			line := fmt.Sprintf("%2d) %s%s", i+1, p, suffix)
 			if i == selected {
@@ -333,10 +410,9 @@ func selectPrinter(printers []string, defaultName, preferred string) (string, er
 			}
 		case vkReturn:
 			fmt.Print("\x1b[0m")
-			fmt.Print("\x1b[2J\x1b[H")
 			return printers[selected], nil
 		case vkEscape:
-			return "", errors.New("用户取消")
+			return "", errUserCancel
 		}
 	}
 }
@@ -753,33 +829,83 @@ func writePrinterText(p escpos.Printer, s string, encoding string) error {
 	}
 }
 
-// fatalWithBox 在终端输出错误并弹窗提示后退出进程（exit code=1）。
-func fatalWithBox(title string, err error) {
-	fmt.Fprintln(os.Stderr, title+":", err)
-	errorBox(title + "\n\n" + err.Error())
-	os.Exit(1)
+func readBanner(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	s := strings.ReplaceAll(string(b), "\r\n", "\n")
+	return strings.TrimRight(s, "\n"), nil
 }
 
-// infoBox 弹出信息提示框（MessageBoxW, MB_ICONINFORMATION）。
-func infoBox(message string) {
-	messageBox("提示", message, 0x00000040)
+func printPage(lines []string) {
+	if vtEnabled {
+		fmt.Print("\x1b[2J\x1b[H")
+	}
+	for _, l := range lines {
+		fmt.Println(l)
+	}
 }
 
-// errorBox 弹出错误提示框（MessageBoxW, MB_ICONERROR）。
-func errorBox(message string) {
-	messageBox("错误", message, 0x00000010)
+type postAction int
+
+const (
+	actionRetry  postAction = iota
+	actionSwitch
+	actionExit
+)
+
+func showPostActions(logs []string, printerName string) postAction {
+	logs = append(logs, "")
+	logs = append(logs, color("\x1b[36m", "当前打印机: "+printerName))
+	logs = append(logs, "")
+	logs = append(logs, color("\x1b[1;37m", "  [Enter] 再次打印  ")+color("\x1b[90m", "用当前打印机再打一份"))
+	logs = append(logs, color("\x1b[1;37m", "  [  C  ] 更改打印机")+color("\x1b[90m", "  切换到其他打印机"))
+	logs = append(logs, color("\x1b[1;37m", "  [ Esc ] 退出程序  "))
+	printPage(logs)
+
+	restoreIn, _ := enableDirectKeyInput()
+	if restoreIn != nil {
+		defer restoreIn()
+	}
+	for {
+		vk, ok, _ := readVirtualKey()
+		if !ok {
+			continue
+		}
+		switch vk {
+		case vkReturn, vkR:
+			return actionRetry
+		case vkC:
+			return actionSwitch
+		case vkEscape:
+			return actionExit
+		}
+	}
 }
 
-// messageBox 封装 WinAPI MessageBoxW，用于在无 GUI 的情况下提示结果/错误。
-func messageBox(title, text string, flags uintptr) {
-	user32 := syscall.NewLazyDLL("user32.dll")
-	proc := user32.NewProc("MessageBoxW")
-	textPtr, _ := syscall.UTF16PtrFromString(text)
-	titlePtr, _ := syscall.UTF16PtrFromString(title)
-	_, _, _ = proc.Call(
-		0,
-		uintptr(unsafe.Pointer(textPtr)),
-		uintptr(unsafe.Pointer(titlePtr)),
-		flags,
-	)
+func logStep(icon, msg string) {
+	fmt.Println(color("\x1b[90m", "•")+" "+icon+" "+msg)
+}
+
+func fail(title string, err error) {
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, color("\x1b[31m", "✗ "+title))
+	fmt.Fprintln(os.Stderr, color("\x1b[90m", err.Error()))
+}
+
+func pause(hint string) {
+	fmt.Println()
+	if strings.TrimSpace(hint) == "" {
+		hint = "按 Enter 继续"
+	}
+	fmt.Println(color("\x1b[90m", hint))
+	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+}
+
+func color(code string, s string) string {
+	if !vtEnabled {
+		return s
+	}
+	return code + s + "\x1b[0m"
 }

@@ -1,5 +1,4 @@
 printer:
-  name: "XP-N160II"
   columns: 48
   encoding: "gb18030"
 
