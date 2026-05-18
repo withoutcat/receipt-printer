@@ -38,7 +38,7 @@ type Receipt struct {
 	StoreName   string `yaml:"store_name"`
 	StartTime   string `yaml:"start_time"`
 	EndTime     string `yaml:"end_time"`
-	Currency    string `yaml:"currency"`
+	MarketType  string `yaml:"market_type"`
 	Area        string `yaml:"area"`
 	Status      string `yaml:"status"`
 	PrintPerson string `yaml:"print_person"`
@@ -55,11 +55,10 @@ type Receipt struct {
 	DiscountAmount     float64 `yaml:"discount_amount"`
 	FixedDiscount      float64 `yaml:"fixed_discount"`
 	Rounding           float64 `yaml:"rounding"`
-	PaymentDiscount    float64 `yaml:"payment_discount"`
+	Revenue           float64 `yaml:"revenue"`
 
-	ActualAmount   float64 `yaml:"actual_amount"`
 	WechatPay      float64 `yaml:"wechat_pay"`
-	WechatSubsidy  float64 `yaml:"wechat_subsidy"`
+	AlipaySubsidy  float64 `yaml:"alipay_subsidy"`
 	Cash           float64 `yaml:"cash"`
 	Alipay         float64 `yaml:"alipay"`
 	MeituanGroup   float64 `yaml:"meituan_group"`
@@ -70,12 +69,7 @@ type Receipt struct {
 	AvgBill        float64 `yaml:"avg_bill"`
 	AvgTable       float64 `yaml:"avg_table"`
 	AvgPerson      float64 `yaml:"avg_person"`
-	OpenTableRate  float64 `yaml:"open_table_rate"`
-	SeatRate       float64 `yaml:"seat_rate"`
-	TurnoverRate   float64 `yaml:"turnover_rate"`
 	AvgDiningTime  float64 `yaml:"avg_dining_time"`
-	AreaEff        float64 `yaml:"area_eff"`
-	PersonEff      float64 `yaml:"person_eff"`
 }
 
 // main 是程序入口：
@@ -107,9 +101,6 @@ func main() {
 	}
 	if strings.TrimSpace(cfg.Printer.Encoding) == "" {
 		cfg.Printer.Encoding = "utf-8"
-	}
-	if cfg.Receipt.ActualAmount == 0 {
-		cfg.Receipt.ActualAmount = cfg.Receipt.WechatPay + cfg.Receipt.WechatSubsidy + cfg.Receipt.Cash + cfg.Receipt.Alipay + cfg.Receipt.MeituanGroup + cfg.Receipt.MeituanWaimai
 	}
 
 	logStep("🧩", "读取模板...")
@@ -531,6 +522,9 @@ func renderTemplate(tpl string, cfg Config) (string, error) {
 			return markerDelim + "FEED:" + strconv.Itoa(n) + markerDelim
 		},
 		"cut": func() string { return markerDelim + "CUT" + markerDelim },
+		"fontsize": func(w, h int) string {
+			return markerDelim + "FONTSIZE:" + strconv.Itoa(w) + ":" + strconv.Itoa(h) + markerDelim
+		},
 		"amt": func(v any) string { return formatAmount(v) },
 		"num": func(v any) string { return formatNumber(v, false) },
 		"pct": func(v any) string { return formatPercent(v) },
@@ -541,6 +535,11 @@ func renderTemplate(tpl string, cfg Config) (string, error) {
 			l := fmt.Sprint(left)
 			r := fmt.Sprint(right)
 			return joinLeftRight(l, r, cfg.Printer.Columns)
+		},
+		"ld": func(left any, right any) string {
+			l := fmt.Sprint(left)
+			r := fmt.Sprint(right)
+			return joinLeftRight(l, r, cfg.Printer.Columns-12)
 		},
 		"hr": func(ch string) string {
 			if ch == "" {
@@ -564,6 +563,7 @@ func renderTemplate(tpl string, cfg Config) (string, error) {
 }
 
 var feedRe = regexp.MustCompile(`^FEED:(\d+)$`)
+var fontSizeRe = regexp.MustCompile(`^FONTSIZE:(\d+):(\d+)$`)
 
 // printRendered 解析 renderTemplate 的输出并打印：
 // - 按行处理，行内用 markerDelim 切分控制标记
@@ -572,6 +572,7 @@ func printRendered(p escpos.Printer, rendered string, encoding string) error {
 	if err := p.Initialize(); err != nil {
 		return err
 	}
+	_ = p.SetLineSpacing(100)
 	lines := strings.Split(rendered, "\n")
 
 	for _, line := range lines {
@@ -585,6 +586,7 @@ func printRendered(p escpos.Printer, rendered string, encoding string) error {
 
 		align := escpos.LeftJustify
 		bold := false
+		fontW, fontH := 0, 0
 		printedText := false
 
 		writeText := func(s string) error {
@@ -596,6 +598,9 @@ func printRendered(p escpos.Printer, rendered string, encoding string) error {
 				return err
 			}
 			if err := p.SetBold(bold); err != nil {
+				return err
+			}
+			if err := p.SetCharacterSize(fontW, fontH); err != nil {
 				return err
 			}
 			if err := writePrinterText(p, s, encoding); err != nil {
@@ -639,6 +644,7 @@ func printRendered(p escpos.Printer, rendered string, encoding string) error {
 			case "RESET":
 				align = escpos.LeftJustify
 				bold = false
+				fontW, fontH = 0, 0
 			case "CUT":
 				if err := p.Justify(escpos.LeftJustify); err != nil {
 					return err
@@ -658,21 +664,31 @@ func printRendered(p escpos.Printer, rendered string, encoding string) error {
 						}
 					}
 				}
+				if m := fontSizeRe.FindStringSubmatch(token); len(m) == 3 {
+					w, _ := strconv.Atoi(m[1])
+					h, _ := strconv.Atoi(m[2])
+					if w > 0 {
+						fontW = w
+					}
+					if h > 0 {
+						fontH = h
+					}
+				}
 			}
 
 			i = k + len(markerDelim)
 		}
 
+		if printedText {
+			if err := p.LF(); err != nil {
+				return err
+			}
+		}
 		if err := p.SetBold(false); err != nil {
 			return err
 		}
 		if err := p.Justify(escpos.LeftJustify); err != nil {
 			return err
-		}
-		if printedText {
-			if err := p.LF(); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
