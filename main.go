@@ -87,7 +87,7 @@ func main() {
 		defer restoreOut()
 	}
 
-	bannerText, _ := readBanner(filepath.Join(baseDir, "banner.txt"))
+	bannerText, _ := readBanner(filepath.Join(baseDir, "banner"))
 
 	logStep("🧾", "读取配置...")
 	cfg, err := readConfig(filepath.Join(baseDir, "config.yaml"))
@@ -104,9 +104,9 @@ func main() {
 	}
 
 	logStep("🧩", "读取模板...")
-	templateText, err := os.ReadFile(filepath.Join(baseDir, "template.txt"))
+	templateText, err := os.ReadFile(filepath.Join(baseDir, "template"))
 	if err != nil {
-		fail("读取 template.txt 失败", err)
+		fail("读取 template 失败", err)
 		pause("按 Enter 退出")
 		return
 	}
@@ -210,7 +210,7 @@ func main() {
 	}
 }
 
-// exeDir 返回当前可执行文件所在目录，用于定位同目录下的 config.yaml / template.txt。
+// exeDir 返回当前可执行文件所在目录，用于定位同目录下的 config.yaml / template。
 func exeDir() (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -508,7 +508,7 @@ func readVirtualKey() (uint16, bool, error) {
 
 const markerDelim = "\x1e"
 
-// renderTemplate 使用 text/template 渲染 template.txt：
+// renderTemplate 使用 text/template 渲染 template：
 // - 通过 FuncMap 注入控制标记（CENTER/BOLD/RESET/FEED/CUT 等）
 // - 模板输出仍是“文本 + 标记”的单一字符串，后续由 printRendered 逐行解析并下发到打印机
 func renderTemplate(tpl string, cfg Config) (string, error) {

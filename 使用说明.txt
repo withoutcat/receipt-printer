@@ -12,14 +12,14 @@
 2. 文件说明
 - print_receipt.exe：主程序（双击运行）
 - config.yaml：数据配置（改数值）
-- template.txt：打印模板（改布局）
-- banner.txt：启动看板（改样式/文案；可删除，删除后不显示）
+- template：打印模板（改布局）
+- banner：启动看板（改样式/文案；可删除，删除后不显示）
 
 3. config.yaml 关键字段
 - printer.columns：打印宽度（默认 48 列，80mm 常用；若排版不齐可调整）
 - printer.encoding：字符编码（默认 utf-8；中文乱码时改为 gb18030）
 
-4. template.txt 可用函数
+4. template 可用函数
 - {{center}}：本行居中（遇到 {{reset}} 或行尾结束）
 - {{bold}}：本行加粗（遇到 {{reset}} 或行尾结束）
 - {{reset}}：恢复默认（左对齐、非加粗、字体 1x1）
