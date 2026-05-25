@@ -103,15 +103,7 @@ func main() {
 		cfg.Printer.Encoding = "utf-8"
 	}
 
-	logStep("🧩", "读取模板...")
-	templateText, err := os.ReadFile(filepath.Join(baseDir, "template"))
-	if err != nil {
-		fail("读取 template 失败", err)
-		pause("按 Enter 退出")
-		return
-	}
-
-	logStep("🧠", "计算指标...")
+	logStep("", "计算指标...")
 	// 营业额 = 纯收金额各项之和
 	cfg.Receipt.Turnover = cfg.Receipt.Alipay + cfg.Receipt.WechatPay + cfg.Receipt.Cash + cfg.Receipt.AlipaySubsidy + cfg.Receipt.MeituanGroup
 	// 品项消费 = 营业额
@@ -132,7 +124,7 @@ func main() {
 	}
 
 	logStep("🧠", "渲染模板...")
-	rendered, err := renderTemplate(string(templateText), cfg)
+	rendered, err := renderTemplate(receiptTemplate, cfg)
 	if err != nil {
 		fail("模板渲染失败", err)
 		pause("按 Enter 退出")
@@ -143,8 +135,7 @@ func main() {
 		color("\x1b[36m", bannerText),
 		"",
 		color("\x1b[90m", "•") + " 🧾 读取配置成功",
-		color("\x1b[90m", "•") + " 🧩 读取模板成功",
-		color("\x1b[90m", "•") + " 🧠 渲染模板成功",
+		color("\x1b[90m", "•") + "  渲染模板成功",
 	}
 
 	selectedPrinter := ""
@@ -525,6 +516,56 @@ func readVirtualKey() (uint16, bool, error) {
 	}
 	return rec.KeyEvent.VirtualKeyCode, true, nil
 }
+
+const receiptTemplate = 
+`{{center}}{{bold}}{{fontsize 2 2}}营业报表{{reset}}
+{{feed 1}}
+{{ld "店名称:" .StoreName}}
+{{ld "开始时间:" .StartTime}}
+{{ld "结束时间:" .EndTime}}
+{{ld "市别:" .MarketType}}
+{{ld "消费区域:" .Area}}
+{{ld "状态:" .Status}}
+{{ld "打印人:" .PrintPerson}}
+{{ld "打印时间:" .PrintTime}}
+{{hr "_"}}
+
+{{bold}}{{fontsize 1 1}}营业情况            金额{{reset}}
+{{feed 1}}
+{{lr "营业额" (amt .Turnover)}}
+{{lr "品项消费" (amt .ItemConsumption)}}
+{{lr "服务费" (amt .ServiceFee)}}
+{{lr "最低消费补齐" (amt .MinConsumptionFill)}}
+{{lr "优惠金额" (amt .DiscountTotal)}}
+{{lr "会员价优惠" (amt .MemberDiscount)}}
+{{lr "促销优惠" (amt .PromotionDiscount)}}
+{{lr "赠送优惠" (amt .GiftDiscount)}}
+{{lr "折扣金额" (amt .DiscountAmount)}}
+{{lr "定额优惠" (amt .FixedDiscount)}}
+{{lr "抹零金额" (amt .Rounding)}}
+{{lr "营业收入" (amt .Revenue)}}
+{{hr "_"}}
+
+{{bold}}{{fontsize 1 1}}纯收金额{{reset}}
+{{feed 1}}
+{{lr "  支付宝支付" (amt .Alipay)}}
+{{lr "  微信支付" (amt .WechatPay)}}
+{{lr "  人民币" (amt .Cash)}}
+{{lr "  支付宝补贴" (amt .AlipaySubsidy)}}
+{{lr "  美团点评团购" (amt .MeituanGroup)}}
+{{hr "_"}}
+
+{{bold}}{{fontsize 1 1}}经营指标{{reset}}
+{{feed 1}}
+{{lr "  账单数" (num .BillCount)}}
+{{lr "  开台数" (num .OpenTableCount)}}
+{{lr "  客流量" (num .GuestFlow)}}
+{{lr "  单均消费" (amt .AvgBill)}}
+{{lr "  桌均消费" (amt .AvgTable)}}
+{{lr "  人均消费" (amt .AvgPerson)}}
+{{lr "  平均用餐时间" (num .AvgDiningTime)}}
+{{feed 2}}
+{{cut}}`
 
 const markerDelim = "\x1e"
 
