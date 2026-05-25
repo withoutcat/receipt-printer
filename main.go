@@ -44,8 +44,8 @@ type Receipt struct {
 	PrintPerson string `yaml:"print_person"`
 	PrintTime   string `yaml:"print_time"`
 
-	Turnover           float64 `yaml:"turnover"`
-	ItemConsumption    float64 `yaml:"item_consumption"`
+	Turnover           float64 // 程序计算：纯收金额之和
+	ItemConsumption    float64 // 程序计算：= 营业额
 	ServiceFee         float64 `yaml:"service_fee"`
 	MinConsumptionFill float64 `yaml:"min_consumption_fill"`
 	DiscountTotal      float64 `yaml:"discount_total"`
@@ -55,7 +55,7 @@ type Receipt struct {
 	DiscountAmount     float64 `yaml:"discount_amount"`
 	FixedDiscount      float64 `yaml:"fixed_discount"`
 	Rounding           float64 `yaml:"rounding"`
-	Revenue           float64 `yaml:"revenue"`
+	Revenue           float64 // 程序计算：营业额 - 优惠金额
 
 	WechatPay      float64 `yaml:"wechat_pay"`
 	AlipaySubsidy  float64 `yaml:"alipay_subsidy"`
@@ -66,9 +66,9 @@ type Receipt struct {
 	BillCount      float64 `yaml:"bill_count"`
 	OpenTableCount float64 `yaml:"open_table_count"`
 	GuestFlow      float64 `yaml:"guest_flow"`
-	AvgBill        float64 `yaml:"avg_bill"`
-	AvgTable       float64 `yaml:"avg_table"`
-	AvgPerson      float64 `yaml:"avg_person"`
+	AvgBill        float64 // 程序计算：营业额 ÷ 账单数
+	AvgTable       float64 // 程序计算：营业额 + 开台数
+	AvgPerson      float64 // 程序计算：营业额 ÷ 客流量
 	AvgDiningTime  float64 `yaml:"avg_dining_time"`
 }
 
@@ -109,6 +109,26 @@ func main() {
 		fail("读取 template 失败", err)
 		pause("按 Enter 退出")
 		return
+	}
+
+	logStep("🧠", "计算指标...")
+	// 营业额 = 纯收金额各项之和
+	cfg.Receipt.Turnover = cfg.Receipt.Alipay + cfg.Receipt.WechatPay + cfg.Receipt.Cash + cfg.Receipt.AlipaySubsidy + cfg.Receipt.MeituanGroup
+	// 品项消费 = 营业额
+	cfg.Receipt.ItemConsumption = cfg.Receipt.Turnover
+	// 营业收入 = 营业额 - 优惠金额
+	cfg.Receipt.Revenue = cfg.Receipt.Turnover - cfg.Receipt.DiscountTotal
+	// 单均消费 = 营业额 ÷ 账单数
+	if cfg.Receipt.BillCount > 0 {
+		cfg.Receipt.AvgBill = cfg.Receipt.Turnover / cfg.Receipt.BillCount
+	}
+	// 桌均消费 = 营业额 ÷ 开台数
+	if cfg.Receipt.OpenTableCount > 0 {
+		cfg.Receipt.AvgTable = cfg.Receipt.Turnover / cfg.Receipt.OpenTableCount
+	}
+	// 人均消费 = 营业额 ÷ 客流量
+	if cfg.Receipt.GuestFlow > 0 {
+		cfg.Receipt.AvgPerson = cfg.Receipt.Turnover / cfg.Receipt.GuestFlow
 	}
 
 	logStep("🧠", "渲染模板...")
